@@ -1,0 +1,5 @@
+package wasm-ecosystem:dwarf;
+
+world dwarf {
+  export scan: func(binary: list<u8>) -> string;
+}
