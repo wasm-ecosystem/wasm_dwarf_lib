@@ -1,84 +1,79 @@
+#![warn(dead_code)]
+
 use crate::dwarf::export;
-use serde_json::json;
-use std::borrow;
-use std::error;
+use std::{cell::RefCell, error, rc::Rc};
 mod dwarf;
 use object::{Object, ObjectSection};
 
 struct DwarfScanner;
 
-impl dwarf::Guest for DwarfScanner {
-    fn scan(binary: Vec<u8>) -> String {
-        let mut results = Vec::new();
+struct DwoParserImpl {
+    binary: Vec<u8>,
+    dwarf: Option<gimli::DwarfSections<gimli::EndianRcSlice<gimli::RunTimeEndian>>>,
+}
 
-        let object = object::File::parse(&*binary).expect("Failed to parse object file");
-        let load_section =
-            |id: gimli::SectionId| -> Result<borrow::Cow<[u8]>, Box<dyn error::Error>> {
-                Ok(match object.section_by_name(id.name()) {
-                    Some(section) => section.uncompressed_data()?,
-                    None => borrow::Cow::Borrowed(&[]),
-                })
-            };
-        let dwarf_sections =
-            gimli::DwarfSections::load(&load_section).expect("load dwarf sections failed");
-        let borrow_section = |section| {
-            gimli::EndianSlice::new(borrow::Cow::as_ref(section), gimli::RunTimeEndian::Little)
-        };
-        let dwarf = dwarf_sections.borrow(borrow_section);
-        let mut iter = dwarf.units();
-        while let Some(header) = iter.next().unwrap() {
-            let unit = dwarf.unit(header).unwrap();
-            let unit = unit.unit_ref(&dwarf);
-            if let Some(program) = unit.line_program.clone() {
-                let mut rows = program.rows();
-                while let Some((_, row)) = rows.next_row().unwrap() {
-                    if row.end_sequence() {
-                        continue;
-                    }
-                    let line = match row.line() {
-                        Some(line) => line.get() - 1, // convention: 0-based line numbers
-                        None => continue,
-                    };
-                    let address = row.address() as u32;
-                    results.push(json!({"line": line, "address": address}));
-                }
-            }
+impl DwoParserImpl {
+    fn init_dwarf(self: &mut Self) {
+        if self.dwarf.is_none() {
+            return;
         }
-        serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string())
+        let object: object::File =
+            object::File::parse(&*self.binary).expect("Failed to parse object file");
+        let dwarf_sections: gimli::DwarfSections<gimli::EndianRcSlice<gimli::RunTimeEndian>> =
+            gimli::DwarfSections::load(&|id: gimli::SectionId| -> Result<
+                gimli::EndianRcSlice<gimli::RunTimeEndian>,
+                Box<dyn error::Error>,
+            > {
+                let data: Rc<[u8]> = match object.section_by_name(id.name()) {
+                    Some(section) => Rc::<[u8]>::from(section.uncompressed_data()?.into_owned()),
+                    None => Rc::new([]),
+                };
+                Ok(gimli::EndianRcSlice::<gimli::RunTimeEndian>::new(
+                    data,
+                    gimli::RunTimeEndian::Little,
+                ))
+            })
+            .expect("load dwarf sections failed");
+        self.dwarf = Some(dwarf_sections);
+    }
+
+    fn get_line_map(self: &mut Self) -> String {
+        self.init_dwarf();
+        String::new()
     }
 }
 
-export!(DwarfScanner with_types_in crate::dwarf);
+struct DwoParser {
+    implement: RefCell<DwoParserImpl>,
+}
 
-#[cfg(test)]
-mod tests {
-    use crate::dwarf::Guest;
+impl dwarf::exports::wasm_ecosystem::dwarf::dwarf_parser::GuestDwo for DwoParser {
+    fn new(obj_binary: Vec<u8>) -> Self {
+        Self {
+            implement: RefCell::new(DwoParserImpl {
+                binary: obj_binary,
+                dwarf: None,
+            }),
+        }
+    }
 
-    #[test]
-    fn test_scan_with_real_dwo_file() {
-        let wat = r#"
-            (module
-                (func
-                    call $bar
-                    drop
-                )
-                (func $bar (result i32)
-                    i32.const 1
-                    i32.const 2
-                    i32.add
-                    i32.const 3
-                    i32.add
-                )
-            )
-        "#;
-        let wasm = wat::Parser::new()
-            .generate_dwarf(wat::GenerateDwarf::Lines)
-            .parse_str(None, wat)
-            .expect("generating wasm failed");
-        let result = super::DwarfScanner::scan(wasm);
-        assert_eq!(
-            result,
-            r#"[{"address":2,"line":3},{"address":4,"line":4},{"address":5,"line":4},{"address":8,"line":7},{"address":10,"line":8},{"address":12,"line":9},{"address":13,"line":10},{"address":15,"line":11},{"address":16,"line":11}]"#
-        );
+    fn get_line_map(&self) -> String {
+        self.implement.borrow_mut().get_line_map()
+    }
+
+    fn list_cu(&self) -> String {
+        todo!()
+    }
+
+    fn list_subprograms(&self, cu: String) -> String {
+        todo!()
     }
 }
+
+struct ExportedDwoParser;
+
+impl dwarf::exports::wasm_ecosystem::dwarf::dwarf_parser::Guest for ExportedDwoParser {
+    type Dwo = DwoParser;
+}
+
+export!(ExportedDwoParser with_types_in crate::dwarf);
