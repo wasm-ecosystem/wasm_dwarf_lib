@@ -1,10 +1,10 @@
-#![warn(dead_code)]
-
 use crate::dwarf::export;
 use std::{cell::RefCell, error, rc::Rc};
 mod dwarf;
 use object::{Object, ObjectSection};
+use serde_json::json;
 
+#[allow(dead_code)]
 struct DwarfScanner;
 
 struct DwoParserImpl {
@@ -13,6 +13,12 @@ struct DwoParserImpl {
 }
 
 impl DwoParserImpl {
+    fn new(obj_binary: Vec<u8>) -> Self {
+        Self {
+            binary: obj_binary,
+            dwarf: None,
+        }
+    }
     fn init_dwarf(self: &mut Self) {
         if self.dwarf.is_none() {
             return;
@@ -39,7 +45,26 @@ impl DwoParserImpl {
 
     fn get_line_map(self: &mut Self) -> String {
         self.init_dwarf();
-        String::new()
+        let mut results = Vec::<serde_json::Value>::new();
+        let debug_line = &self.dwarf.as_ref().unwrap().debug_line;
+        let offset = gimli::DebugLineOffset(0);
+        let address_size = 8;
+        let program = debug_line
+            .program(offset, address_size, None, None)
+            .expect("should have found a header at that offset, and parsed it OK");
+        let mut rows = program.rows();
+        while let Some((_, row)) = rows.next_row().unwrap() {
+            if row.end_sequence() {
+                continue;
+            }
+            let line = match row.line() {
+                Some(line) => line.get() - 1, // convention: 0-based line numbers
+                None => continue,
+            };
+            let address = row.address() as u32;
+            results.push(json!({"line": line, "address": address}));
+        }
+        serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string())
     }
 }
 
@@ -50,10 +75,7 @@ struct DwoParser {
 impl dwarf::exports::wasm_ecosystem::dwarf::dwarf_parser::GuestDwo for DwoParser {
     fn new(obj_binary: Vec<u8>) -> Self {
         Self {
-            implement: RefCell::new(DwoParserImpl {
-                binary: obj_binary,
-                dwarf: None,
-            }),
+            implement: RefCell::new(DwoParserImpl::new(obj_binary)),
         }
     }
 
@@ -77,3 +99,37 @@ impl dwarf::exports::wasm_ecosystem::dwarf::dwarf_parser::Guest for ExportedDwoP
 }
 
 export!(ExportedDwoParser with_types_in crate::dwarf);
+
+#[cfg(test)]
+mod tests {
+    use crate::dwarf::Guest;
+
+    #[test]
+    fn test_scan_with_real_dwo_file() {
+        let wat = r#"
+            (module
+                (func
+                    call $bar
+                    drop
+                )
+                (func $bar (result i32)
+                    i32.const 1
+                    i32.const 2
+                    i32.add
+                    i32.const 3
+                    i32.add
+                )
+            )
+        "#;
+        let wasm = wat::Parser::new()
+            .generate_dwarf(wat::GenerateDwarf::Lines)
+            .parse_str(None, wat)
+            .expect("generating wasm failed");
+        let mut parser = super::DwoParserImpl::new(wasm);
+        let result = parser.get_line_map();
+        assert_eq!(
+            result,
+            r#"[{"address":2,"line":3},{"address":4,"line":4},{"address":5,"line":4},{"address":8,"line":7},{"address":10,"line":8},{"address":12,"line":9},{"address":13,"line":10},{"address":15,"line":11},{"address":16,"line":11}]"#
+        );
+    }
+}
