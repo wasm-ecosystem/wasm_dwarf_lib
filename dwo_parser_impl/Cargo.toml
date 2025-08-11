@@ -1,0 +1,13 @@
+[package]
+name = "dwo_parser_impl"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gimli = { workspace = true }
+serde_json = { workspace = true }
+object = { workspace = true }
+
+
+[dev-dependencies]
+wat = { version = "1.235.0", features = ["dwarf"] }

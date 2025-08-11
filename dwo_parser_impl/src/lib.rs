@@ -1,26 +1,21 @@
-use crate::dwarf::export;
-use std::{cell::RefCell, error, rc::Rc};
-mod dwarf;
 use object::{Object, ObjectSection};
 use serde_json::json;
+use std::{error, rc::Rc};
 
-#[allow(dead_code)]
-struct DwarfScanner;
-
-struct DwoParserImpl {
-    binary: Vec<u8>,
-    dwarf: Option<gimli::DwarfSections<gimli::EndianRcSlice<gimli::RunTimeEndian>>>,
+pub struct DwoParserImpl {
+    pub binary: Vec<u8>,
+    pub dwarf: Option<gimli::DwarfSections<gimli::EndianRcSlice<gimli::RunTimeEndian>>>,
 }
 
 impl DwoParserImpl {
-    fn new(obj_binary: Vec<u8>) -> Self {
+    pub fn new(obj_binary: Vec<u8>) -> Self {
         Self {
             binary: obj_binary,
             dwarf: None,
         }
     }
-    fn init_dwarf(self: &mut Self) {
-        if self.dwarf.is_none() {
+    pub fn init_dwarf(&mut self) {
+        if self.dwarf.is_some() {
             return;
         }
         let object: object::File =
@@ -43,7 +38,7 @@ impl DwoParserImpl {
         self.dwarf = Some(dwarf_sections);
     }
 
-    fn get_line_map(self: &mut Self) -> String {
+    pub fn get_line_map(&mut self) -> String {
         self.init_dwarf();
         let mut results = Vec::<serde_json::Value>::new();
         let debug_line = &self.dwarf.as_ref().unwrap().debug_line;
@@ -68,64 +63,31 @@ impl DwoParserImpl {
     }
 }
 
-struct DwoParser {
-    implement: RefCell<DwoParserImpl>,
-}
-
-impl dwarf::exports::wasm_ecosystem::dwarf::dwarf_parser::GuestDwo for DwoParser {
-    fn new(obj_binary: Vec<u8>) -> Self {
-        Self {
-            implement: RefCell::new(DwoParserImpl::new(obj_binary)),
-        }
-    }
-
-    fn get_line_map(&self) -> String {
-        self.implement.borrow_mut().get_line_map()
-    }
-
-    fn list_cu(&self) -> String {
-        todo!()
-    }
-
-    fn list_subprograms(&self, cu: String) -> String {
-        todo!()
-    }
-}
-
-struct ExportedDwoParser;
-
-impl dwarf::exports::wasm_ecosystem::dwarf::dwarf_parser::Guest for ExportedDwoParser {
-    type Dwo = DwoParser;
-}
-
-export!(ExportedDwoParser with_types_in crate::dwarf);
-
 #[cfg(test)]
 mod tests {
-    use crate::dwarf::Guest;
+    use super::*;
 
     #[test]
     fn test_scan_with_real_dwo_file() {
         let wat = r#"
-            (module
-                (func
-                    call $bar
-                    drop
-                )
-                (func $bar (result i32)
-                    i32.const 1
-                    i32.const 2
-                    i32.add
-                    i32.const 3
-                    i32.add
-                )
-            )
-        "#;
+          (module
+              (func
+                  call $bar
+                  drop
+              )
+              (func $bar (result i32)
+                  i32.const 1
+                  i32.const 2
+                  i32.add
+                  i32.const 3
+                  i32.add
+              )
+          )"#;
         let wasm = wat::Parser::new()
             .generate_dwarf(wat::GenerateDwarf::Lines)
             .parse_str(None, wat)
             .expect("generating wasm failed");
-        let mut parser = super::DwoParserImpl::new(wasm);
+        let mut parser = DwoParserImpl::new(wasm);
         let result = parser.get_line_map();
         assert_eq!(
             result,

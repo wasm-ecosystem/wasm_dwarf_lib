@@ -1,0 +1,17 @@
+[package]
+name = "binding"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+gimli = { workspace = true }
+serde_json = { workspace = true }
+object = { workspace = true }
+wit-bindgen-rt = "0.43.0"
+dwo_parser_impl = { path = "../dwo_parser_impl" }
+
+[build-dependencies]
+wit-bindgen = "0.43.0"
