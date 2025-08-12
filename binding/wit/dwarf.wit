@@ -1,0 +1,8 @@
+package wasm-ecosystem:dwarf;
+
+world dwarf {
+  type dwo-handler = u64;
+  export dwo-create: func(obj-binary: list<u8>) -> dwo-handler;
+  export dwo-destroy: func(dwo: dwo-handler);
+  export dwo-get-line-map: func(dwo: dwo-handler) -> string; // [{ line: number, address: number }]
+}
