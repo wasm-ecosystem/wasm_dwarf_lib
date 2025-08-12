@@ -1,15 +1,8 @@
 package wasm-ecosystem:dwarf;
 
- 
-interface dwarf-parser {
-  resource dwo {
-    constructor(obj-binary: list<u8>);
-    get-line-map: func() -> string; // [{ line: number, address: number }]
-    list-cu: func() -> string; // [{name: string}]
-    list-subprograms: func(cu: string) -> string; // [{cu:string, name: string, high_pc: number, low_pc: number}]
-  }
-}
-
 world dwarf {
-  export dwarf-parser;
+  type dwo-handler = u64;
+  export dwo-create: func(obj-binary: list<u8>) -> dwo-handler;
+  export dwo-destroy: func(dwo: dwo-handler);
+  export dwo-get-line-map: func(dwo: dwo-handler) -> string; // [{ line: number, address: number }]
 }

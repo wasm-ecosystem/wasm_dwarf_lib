@@ -1,39 +1,24 @@
 use crate::dwarf::export;
-use std::cell::RefCell;
 mod dwarf;
-use dwo_parser_impl::DwoParserImpl;
 
-#[allow(dead_code)]
-struct DwarfScanner;
+struct DwoParser;
 
-struct DwoParser {
-    implement: RefCell<dwo_parser_impl::DwoParserImpl>,
-}
-
-impl dwarf::exports::wasm_ecosystem::dwarf::dwarf_parser::GuestDwo for DwoParser {
-    fn new(obj_binary: Vec<u8>) -> Self {
-        Self {
-            implement: RefCell::new(dwo_parser_impl::DwoParserImpl::new(obj_binary)),
-        }
+impl dwarf::Guest for DwoParser {
+    fn dwo_create(obj_binary: Vec<u8>) -> dwarf::DwoHandler {
+        let dwo: Box<dwo_parser_impl::DwoParserImpl> =
+            Box::new(dwo_parser_impl::DwoParserImpl::new(obj_binary));
+        let handle: *mut dwo_parser_impl::DwoParserImpl = Box::into_raw(dwo);
+        handle as u64
+    }
+    fn dwo_destroy(dwo: dwarf::DwoHandler) -> () {
+        let _ = unsafe { Box::from_raw(dwo as *mut dwo_parser_impl::DwoParserImpl) };
     }
 
-    fn get_line_map(&self) -> String {
-        self.implement.borrow_mut().get_line_map()
-    }
-
-    fn list_cu(&self) -> String {
-        todo!()
-    }
-
-    fn list_subprograms(&self, cu: String) -> String {
-        todo!()
+    fn dwo_get_line_map(dwo: dwarf::DwoHandler) -> String {
+        let dwo: &mut dwo_parser_impl::DwoParserImpl =
+            unsafe { &mut *(dwo as *mut dwo_parser_impl::DwoParserImpl) };
+        dwo.get_line_map()
     }
 }
 
-struct ExportedDwoParser;
-
-impl dwarf::exports::wasm_ecosystem::dwarf::dwarf_parser::Guest for ExportedDwoParser {
-    type Dwo = DwoParser;
-}
-
-export!(ExportedDwoParser with_types_in crate::dwarf);
+export!(DwoParser with_types_in crate::dwarf);
